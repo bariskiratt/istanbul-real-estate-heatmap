@@ -49,7 +49,7 @@ durumda olan kısım **Modül 2 — Bütçe Isı Haritası**'dır:
 | ✅ | FastAPI ısı haritası servisi (`app/`) |
 | ✅ | Leaflet tabanlı interaktif harita (`web/index.html`) |
 | ✅ | Adil fiyat tahmin modeli (`app/pricing.py`, `scripts/train_model.py`) |
-| ⬜ | Alternatif semt önerileri (Modül 3) |
+| 🚧 | Alternatif semt önerileri (Modül 3) — ulaşım verisi hazır, motor yazılıyor |
 | ⬜ | Ev arkadaşı eşleştirme |
 
 ## 📂 Proje Yapısı
@@ -66,6 +66,7 @@ scripts/                    offline betikler (sunucuda çalışmaz)
   train_model.py            adil fiyat modelini eğitir
   explore.py                veri keşfi
   repair_geojson.py         bozuk GeoJSON onarımı (tek seferlik)
+  fetch_transit.py          OSM'den metro/Marmaray istasyonlarını indirir
 data/
   raw/                      dokunulmamış kaynak veri
   processed/                üretilen veri
@@ -161,3 +162,39 @@ demek dürüsttür.
   sahil yakınlığı gibi fiyatı ciddi etkileyen değişkenler modelde yok.
 * **Eğitim aralığı dışına çıkılamaz:** 20–1000 m², 0–100 yaş, 3.000–500.000 TL.
   API bu sınırların dışındaki girdileri 422 ile reddeder.
+
+
+## 🚇 Toplu Taşıma Verisi (Modül 3 altyapısı)
+
+```bash
+python -m scripts.fetch_transit    # data/raw/transit_stations.json
+```
+
+**Kaynak:** OpenStreetMap, [Overpass API](https://overpass-api.de) üzerinden.
+Üyelik ve API anahtarı gerektirmez, lisans ODbL. Sonuç: **261 istasyon,
+18 hat** (M1A–M11, T4/T5/T7, F3 ve B1 Marmaray), **56 aktarma noktası**.
+
+Resmi alternatif [data.ibb.gov.tr](https://data.ibb.gov.tr) (GTFS) daha
+eksiksiz — İETT otobüs, vapur, minibüs de içeriyor — ama üyelik istiyor ve
+indirme elle yapılıyor. Raylı sistem yeterli olduğu için OSM tercih edildi.
+
+### Bu veriyi çekerken karşılaşılan iki tuzak
+
+**1. Hat ilişkileri istasyon düğümlerini üye almaz.** OSM'de `railway=station`
+düğümleri ile hatları taşıyan `public_transport=stop_position` düğümleri
+ayrıdır. İstasyonları ayrı sorgulayıp hatlarla eşleştirmeye çalışınca 566
+istasyonun yalnızca 22'si bir hatta bağlanıyordu. Doğrusu, istasyonları
+doğrudan hat ilişkilerinin üyelerinden türetmek (`node(r.routes)`).
+
+**2. `network` filtresi olmadan şehirlerarası hatlar geliyor.** Filtresiz
+sorgu Ankara/Konya/Sivas YHT hatlarını da döndürüyor; bunlar şehir içi
+erişilebilirlik için anlamsız.
+
+Ayrıca her hat yönü kendi durak düğümünü taşıdığı için ham veride "Üsküdar"
+3 ayrı kayıt olarak, her biri tek hatla görünür. `merge_duplicate_stops`
+aynı adlı ve ~500 m içindeki düğümleri birleştirir; aktarma yapısı ancak
+bundan sonra doğru çıkıyor (Üsküdar = B1 + M5).
+
+**Not:** Overpass'in ücretsiz aynaları sık sık meşgul döner (200 yanıtla
+HTML hata sayfası bile gelebilir). Betik üç aynayı sırayla, artan beklemeyle
+dener; yine de başarısız olursa birkaç dakika sonra tekrar çalıştır.
