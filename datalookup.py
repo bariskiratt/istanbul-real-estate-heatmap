@@ -1,50 +1,73 @@
-# explore.py
-import pandas as pd
-import numpy as np
+"""Ham ilan verisinden mahalle bazlı piyasa değerlerini üretir.
 
-def load_and_explore(file_path):
+Çıktı: neighborhood_market_values.csv (API'nin ısı haritasını renklendirmek
+için kullandığı dosya).
+"""
+
+import pandas as pd
+
+DATA_PATH = "istanbulApartmentForRent.csv"
+OUTPUT_PATH = "neighborhood_market_values.csv"
+
+# Ham veri seti kirli: "price" sütununda aylık kira (~22.000 TL medyan) ile
+# birlikte satılık ilan fiyatları (23.000.000 TL'ye kadar) ve bin cinsinden
+# girilmiş değerler (40, 60 gibi) karışık duruyor. Bu bant dışındaki her şeyi
+# kira olarak kabul etmiyoruz.
+MIN_RENT = 3_000
+MAX_RENT = 500_000
+
+# Tek bir ilandan mahalle ortalaması üretmek yanıltıcı olur.
+MIN_LISTINGS = 3
+
+
+def build_market_values(file_path=DATA_PATH, output_path=OUTPUT_PATH):
     print("🔄 Veri seti yükleniyor...")
-    # Temizlenmiş verini buraya yükle
     df = pd.read_csv(file_path)
-    
-    # 1. price_per_m2 (Metrekare Başına Fiyat) Hesaplaması
-    # m2 alanı 0 olan hatalı satırlar varsa hata almamak için önlem alıyoruz
-    print("📊 Metrekare başına fiyat hesaplanıyor...")
-    df = df[df['area (m2)'] > 0] # Güvenli bölge
-    df['price_per_m2'] = df['price'] / df['area (m2)']
-    
-    # 2. İlçe (District) ve Mahalle (Neighborhood) Bazlı Ortalama Fiyatlar
-    print("\n🏢 İlçe Bazlı Özet (İlk 10):")
-    district_summary = df.groupby('district').agg(
-        total_listings=('price', 'count'),
-        avg_price=('price', 'mean'),
-        avg_m2=('area (m2)', 'mean'),
-        avg_price_per_m2=('price_per_m2', 'mean')
-    ).sort_values(by='avg_price', ascending=False)
-    
-    print(district_summary.head(10))
-    
-    print("\n📍 Mahalle Bazlı Özet (İlk 10):")
-    neighborhood_summary = df.groupby(['district', 'neighborhood']).agg(
-        total_listings=('price', 'count'),
-        avg_price=('price', 'mean'),
-        avg_price_per_m2=('price_per_m2', 'mean')
-    ).sort_values(by='avg_price_per_m2', ascending=False)
-    
-    print(neighborhood_summary.head(10))
-    
-    # Analiz sonuçlarını backend ve heatmap için kaydetme
-    # Bu CSV, ileride haritayı renklendirirken bütçe kontrolü için çok işimize yarayacak
-    neighborhood_summary.reset_index().to_csv('neighborhood_market_values.csv', index=False)
-    print("\n💾 Mahalle bazlı piyasa değerleri 'neighborhood_market_values.csv' olarak kaydedildi.")
-    
-    return df
+
+    df["district"] = df["district"].astype(str).str.strip()
+    df["neighborhood"] = df["neighborhood"].astype(str).str.strip()
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
+    before = len(df)
+    df = df.drop_duplicates()
+    print(f"🧹 {before - len(df)} yinelenen kayıt silindi.")
+
+    # Geçerli kira bandı ve pozitif metrekare filtresi.
+    df = df[
+        df["price"].between(MIN_RENT, MAX_RENT)
+        & (df["area (m2)"] > 0)
+    ].copy()
+    print(f"🧹 Kira bandı ({MIN_RENT:,}-{MAX_RENT:,} TL) dışındaki ilanlar elendi, "
+          f"{len(df)} kayıt kaldı.")
+
+    df["price_per_m2"] = df["price"] / df["area (m2)"]
+
+    # Medyan kullanıyoruz: ortalama, tek bir aşırı ilandan ciddi şekilde etkilenir.
+    summary = (
+        df.groupby(["district", "neighborhood"])
+        .agg(
+            total_listings=("price", "count"),
+            avg_price=("price", "median"),
+            avg_price_per_m2=("price_per_m2", "median"),
+        )
+        .reset_index()
+    )
+
+    dropped = summary[summary["total_listings"] < MIN_LISTINGS]
+    summary = summary[summary["total_listings"] >= MIN_LISTINGS]
+    print(f"🧹 {len(dropped)} mahalle {MIN_LISTINGS} ilandan az olduğu için elendi.")
+
+    summary = summary.sort_values("avg_price", ascending=False)
+    summary.to_csv(output_path, index=False)
+
+    print(f"\n📍 En pahalı 10 mahalle:")
+    print(summary.head(10).to_string(index=False))
+    print(f"\n💾 {len(summary)} mahalle '{output_path}' dosyasına yazıldı.")
+    return summary
+
 
 if __name__ == "__main__":
-    # Veri setinin adını kendi dosya adına göre güncelleyebilirsin
-    DATA_PATH = "istanbulApartmentForRent.csv" 
-    
     try:
-        processed_df = load_and_explore(DATA_PATH)
+        build_market_values()
     except FileNotFoundError:
-        print(f"❌ Hata: '{DATA_PATH}' dosyası bulunamadı. Lütfen temizlediğin verinin adını kontrol et.")
+        print(f"❌ Hata: '{DATA_PATH}' bulunamadı.")

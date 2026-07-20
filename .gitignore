@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+
+# Ortam / sırlar
+.env
+.env.*
+
+# Editör / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Geçici veri dosyaları
+mahalle_fixed.geojson
+response_*.json
+
+# Eğitilmiş model (~6 MB) — 'python train_model.py' ile yeniden üretilir
+fair_price_model.joblib
+
+# Kişisel dosyalar (herkese açık depoya gitmemeli)
+resume.tex

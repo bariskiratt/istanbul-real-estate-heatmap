@@ -33,3 +33,104 @@ Bu proje, sağlam bir veri boru hattı (data pipeline) ve modern bir web mimaris
 * **Backend API:** Python, FastAPI (ML modellerinin hızlı ve asenkron olarak frontend'e servis edilmesi).
 * **Frontend:** React.js / Next.js, TailwindCSS (Modern, swipe tabanlı kullanıcı arayüzü).
 * **Harita Entegrasyonu:** Mapbox GL JS veya Google Maps API (Isı haritası ve lokasyon bazlı görselleşt
+
+
+---
+
+## 📌 Mevcut Durum (Ne Çalışıyor?)
+
+Yukarıdaki bölüm projenin **hedef** kapsamını anlatır. Şu an depoda çalışır
+durumda olan kısım **Modül 2 — Bütçe Isı Haritası**'dır:
+
+| Durum | Bileşen |
+|---|---|
+| ✅ | Veri temizleme boru hattı (`datalookup.py`) |
+| ✅ | Mahalle bazlı piyasa değerleri (`neighborhood_market_values.csv`) |
+| ✅ | FastAPI ısı haritası servisi (`main.py`, `heatmap.py`) |
+| ✅ | Leaflet tabanlı interaktif harita (`index.html`) |
+| ✅ | Adil fiyat tahmin modeli (`pricing.py`, `train_model.py`) |
+| ⬜ | Alternatif semt önerileri (Modül 3) |
+| ⬜ | Ev arkadaşı eşleştirme |
+
+## ▶️ Kurulum ve Çalıştırma
+
+```bash
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+python datalookup.py     # piyasa değerlerini üretir (opsiyonel, CSV depoda hazır)
+python train_model.py    # adil fiyat modelini eğitir (~1 dk, zorunlu)
+python main.py           # API + arayüz: http://127.0.0.1:8000
+```
+
+macOS'ta LightGBM için OpenMP gerekiyor: `brew install libomp`.
+
+Model dosyası (`fair_price_model.joblib`, ~6 MB) depoya dâhil değildir;
+`train_model.py` ile üretilir. Model yoksa harita yine çalışır, yalnızca
+adil fiyat sekmesi devre dışı kalır.
+
+## 🔌 API
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /api/geojson` | Mahalle sınırları + fiyatlar. Bütçeden bağımsız, bir kez indirilir (~900 KB gzip). |
+| `GET /api/heatmap?budget=25000` | Bütçeye göre mahalle durum listesi (~600 B gzip). |
+| `GET /api/legend` | Renk/etiket sözlüğü. |
+| `GET /api/locations` | Formu doldurmak için ilçe -> mahalle listesi. |
+| `POST /api/estimate` | İlan özelliklerinden adil kira aralığı tahmini. |
+
+Geometri ve renklendirme ayrıştırıldığı için bütçe değiştiğinde tarayıcı
+yalnızca birkaç yüz baytlık bir yanıt indirir; sınırlar yeniden çizilmez.
+
+## ⚠️ Veri Kalitesi Notları
+
+Ham `istanbulApartmentForRent.csv` karışık veri içeriyor: aylık kiraların yanında
+satılık ilan fiyatları (23.000.000 TL'ye kadar) ve bin cinsinden girilmiş
+değerler (40, 60) var. `datalookup.py` bu yüzden:
+
+* İlanları **3.000 – 500.000 TL** kira bandına sınırlar,
+* Ortalama yerine **medyan** kullanır (tek bir aşırı ilan mahalleyi bozmasın),
+* En az **3 ilanı** olmayan mahalleleri eler.
+
+Sonuç: 968 mahallenin **489'u** (fiyat verisi bulunan 539 mahallenin %91'i)
+haritada renklendirilir. Kalan mahallelerde yeterli ilan verisi yoktur ve
+"Veri Yok" olarak gösterilir.
+
+
+## 🤖 Adil Fiyat Modeli (Modül 1)
+
+`train_model.py` dört yaklaşımı 5-kat çapraz doğrulamayla karşılaştırır.
+Hedef `log(fiyat)`, hatalar kullanıcının gördüğü TL uzayında raporlanır:
+
+| Model | MAE | MedAE | Medyan sapma | R² |
+|---|---|---|---|---|
+| Baseline (mahalle medyanı) | 19.655 | 7.000 | %25.0 | 0.36 |
+| Ridge (one-hot) | 14.112 | 5.243 | %18.3 | 0.58 |
+| XGBoost | 13.103 | 4.566 | %16.0 | 0.53 |
+| LightGBM | 13.391 | 4.655 | %16.3 | 0.54 |
+| **LightGBM q50 (servis edilen)** | **11.573** | **4.442** | **%15.1** | **0.67** |
+
+Baseline ("mahallenin medyan kirasını söyle") kasıtlı olarak konuldu: model
+bunu geçemiyorsa özelliklerin bir değeri yok demektir. Gerçek kazanç
+**%25 → %15.1** medyan sapma.
+
+**Neden çeyreklik regresyonu:** tek bir sayı yerine q25/q50/q75 modelleri
+eğitilip bir *aralık* sunuluyor. "Bu ev 38.710 TL eder" demek, veriyle
+desteklenmeyen bir kesinlik iddiasıdır; "adil aralık 36.231 – 46.509 TL"
+demek dürüsttür.
+
+**Özellikler:** oda, salon, `log(alan)`, bina yaşı, kat, ilçe, mahalle
+(571 mahalle, ağaç modellerinde doğal kategorik olarak).
+
+### Bilinen sınırlar
+
+* **Verinin tarihi belli değil.** CSV'de tarih sütunu yok; bu fiyatların hangi
+  döneme ait olduğunu bilmiyoruz. İstanbul'daki enflasyon hızında bu ciddi bir
+  kısıt — yayına alınacaksa veri dönemi arayüzde belirtilmeli.
+* **Aynı dairenin tekrar ilana çıkması** tespit edilmiyor. Yalnızca birebir
+  yinelenen satırlar atıldı; benzer ilanlar CV skorunu bir miktar iyimser
+  gösteriyor olabilir.
+* **Konum yalnızca isimle temsil ediliyor.** Metroya uzaklık, Boğaz manzarası,
+  sahil yakınlığı gibi fiyatı ciddi etkileyen değişkenler modelde yok.
+* **Eğitim aralığı dışına çıkılamaz:** 20–1000 m², 0–100 yaş, 3.000–500.000 TL.
+  API bu sınırların dışındaki girdileri 422 ile reddeder.
