@@ -6,7 +6,7 @@ yalnızca "fiyat -> renk" karşılaştırması çalışır; bu O(mahalle) ve san
 binde biri kadar sürer.
 """
 
-from normalize import (
+from app.normalize import (
     display_name,
     extract_place,
     norm_district,

@@ -8,8 +8,7 @@ temizlik ve özellik üretimi tek yerde tutuluyor.
 import numpy as np
 import pandas as pd
 
-DATA_PATH = "istanbulApartmentForRent.csv"
-MODEL_PATH = "fair_price_model.joblib"
+from app.config import LISTINGS_CSV, MODEL_PATH  # noqa: F401  (MODEL_PATH yeniden ihraç)
 
 # Aylık kira bandı. Ham veride satılık ilanlar (23.000.000 TL'ye kadar) ve
 # bin cinsinden girilmiş değerler (40, 60) karışık duruyor.
@@ -33,7 +32,7 @@ FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET = "log_price"
 
 
-def load_clean_data(path=DATA_PATH):
+def load_clean_data(path=LISTINGS_CSV):
     """Ham CSV'yi okur, yinelenenleri ve imkânsız değerleri eler."""
     df = pd.read_csv(path)
     df = df.drop_duplicates()

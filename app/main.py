@@ -2,7 +2,6 @@
 
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import joblib
 import numpy as np
@@ -13,12 +12,14 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from heatmap import STATUS_STYLES, annotate_features, build_budget_heatmap
-from pricing import BOUNDS, MODEL_PATH, build_features
-
-BASE_DIR = Path(__file__).parent
-GEOJSON_PATH = BASE_DIR / "mahalle_geojson.json"
-MARKET_VALUES_PATH = BASE_DIR / "neighborhood_market_values.csv"
+from app.config import (
+    INDEX_HTML,
+    MARKET_VALUES_CSV,
+    MODEL_PATH,
+    NEIGHBORHOOD_GEOJSON,
+)
+from app.heatmap import STATUS_STYLES, annotate_features, build_budget_heatmap
+from app.pricing import BOUNDS, build_features
 
 
 class EstimateRequest(BaseModel):
@@ -48,10 +49,10 @@ STATE: dict = {}
 async def lifespan(_app: FastAPI):
     """Ağır veriyi süreç başına bir kez yükler ve indeksler."""
     print("🚀 Veriler yükleniyor...")
-    with GEOJSON_PATH.open(encoding="utf-8") as f:
+    with NEIGHBORHOOD_GEOJSON.open(encoding="utf-8") as f:
         geojson = json.load(f)
 
-    df = pd.read_csv(MARKET_VALUES_PATH)
+    df = pd.read_csv(MARKET_VALUES_CSV)
     matched = annotate_features(geojson, df)
     total = len(geojson.get("features", []))
 
@@ -64,14 +65,13 @@ async def lifespan(_app: FastAPI):
           f"({matched / total * 100:.1f}%).")
 
     # Adil fiyat modeli opsiyonel: yoksa harita yine de çalışsın.
-    model_file = BASE_DIR / MODEL_PATH
-    if model_file.exists():
-        STATE["model"] = joblib.load(model_file)
+    if MODEL_PATH.exists():
+        STATE["model"] = joblib.load(MODEL_PATH)
         print(f"✅ Adil fiyat modeli yüklendi "
               f"(medyan sapma %{STATE['model']['served_medape']:.1f}).")
     else:
-        print(f"⚠️  '{MODEL_PATH}' yok — /api/estimate devre dışı. "
-              f"Eğitmek için: python train_model.py")
+        print(f"⚠️  Model yok ({MODEL_PATH}) — /api/estimate devre dışı. "
+              f"Eğitmek için: python -m scripts.train_model")
 
     yield
     STATE.clear()
@@ -97,7 +97,7 @@ app.add_middleware(
 
 @app.get("/")
 async def index():
-    return FileResponse(BASE_DIR / "index.html")
+    return FileResponse(INDEX_HTML)
 
 
 @app.get("/api/geojson")
@@ -133,7 +133,7 @@ async def get_legend():
 async def get_locations():
     """Formu doldurmak için modelin tanıdığı ilçe -> mahalle listesi."""
     model = _require_model()
-    df = pd.read_csv(MARKET_VALUES_PATH)
+    df = pd.read_csv(MARKET_VALUES_CSV)
     known = set(model["categories"]["neighborhood"])
 
     grouped: dict[str, list[str]] = {}
@@ -214,4 +214,4 @@ async def estimate(payload: EstimateRequest):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000)

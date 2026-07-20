@@ -1,7 +1,7 @@
 """Adil kira fiyatı modelini eğitir, karşılaştırır ve kaydeder.
 
-Çalıştırma:  python train_model.py
-Çıktı:       fair_price_model.joblib
+Çalıştırma:  python -m scripts.train_model
+Çıktı:       models/fair_price_model.joblib
 """
 
 import warnings
@@ -17,9 +17,9 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from xgboost import XGBRegressor
 
-from pricing import (
+from app.config import MODEL_PATH
+from app.pricing import (
     CATEGORICAL_FEATURES,
-    MODEL_PATH,
     NUMERIC_FEATURES,
     build_features,
     extract_categories,
@@ -190,8 +190,9 @@ def main():
         "baseline_medape": float(baseline_error),
         "n_samples": len(df),
     }
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(artifact, MODEL_PATH)
-    print(f"\n💾 '{MODEL_PATH}' kaydedildi.")
+    print(f"\n💾 '{MODEL_PATH.relative_to(MODEL_PATH.parent.parent)}' kaydedildi.")
 
     # Örnek tahmin — makul mü diye gözle bak.
     print("\n🔍 Örnek: Kadıköy / Caferağa Mah., 2+1, 90 m², 20 yaş, 3. kat")

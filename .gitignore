@@ -15,11 +15,11 @@ env/
 .DS_Store
 
 # Geçici veri dosyaları
-mahalle_fixed.geojson
+data/raw/mahalle_fixed.geojson
 response_*.json
 
-# Eğitilmiş model (~6 MB) — 'python train_model.py' ile yeniden üretilir
-fair_price_model.joblib
+# Eğitilmiş model (~6 MB) — 'python -m scripts.train_model' ile yeniden üretilir
+models/*.joblib
 
 # Kişisel dosyalar (herkese açık depoya gitmemeli)
 resume.tex

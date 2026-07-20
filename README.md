@@ -44,13 +44,37 @@ durumda olan kısım **Modül 2 — Bütçe Isı Haritası**'dır:
 
 | Durum | Bileşen |
 |---|---|
-| ✅ | Veri temizleme boru hattı (`datalookup.py`) |
-| ✅ | Mahalle bazlı piyasa değerleri (`neighborhood_market_values.csv`) |
-| ✅ | FastAPI ısı haritası servisi (`main.py`, `heatmap.py`) |
-| ✅ | Leaflet tabanlı interaktif harita (`index.html`) |
-| ✅ | Adil fiyat tahmin modeli (`pricing.py`, `train_model.py`) |
+| ✅ | Veri temizleme boru hattı (`scripts/build_market_values.py`) |
+| ✅ | Mahalle bazlı piyasa değerleri (`data/processed/`) |
+| ✅ | FastAPI ısı haritası servisi (`app/`) |
+| ✅ | Leaflet tabanlı interaktif harita (`web/index.html`) |
+| ✅ | Adil fiyat tahmin modeli (`app/pricing.py`, `scripts/train_model.py`) |
 | ⬜ | Alternatif semt önerileri (Modül 3) |
 | ⬜ | Ev arkadaşı eşleştirme |
+
+## 📂 Proje Yapısı
+
+```
+app/                        FastAPI uygulaması
+  config.py                 tüm dosya yolları tek yerde
+  main.py                   API uç noktaları
+  heatmap.py                fiyat indeksi + renklendirme
+  pricing.py                model veri hazırlığı (eğitim ve servis paylaşır)
+  normalize.py              Türkçe adres eşleştirme
+scripts/                    offline betikler (sunucuda çalışmaz)
+  build_market_values.py    ham ilanlardan mahalle medyanlarını üretir
+  train_model.py            adil fiyat modelini eğitir
+  explore.py                veri keşfi
+  repair_geojson.py         bozuk GeoJSON onarımı (tek seferlik)
+data/
+  raw/                      dokunulmamış kaynak veri
+  processed/                üretilen veri
+models/                     eğitilmiş model (git'e dâhil değil)
+web/index.html              arayüz
+```
+
+Yollar `app/config.py` içinde `__file__` üzerinden çözülür; betikler hangi
+dizinden çalıştırılırsa çalıştırılsın veriyi bulur.
 
 ## ▶️ Kurulum ve Çalıştırma
 
@@ -58,15 +82,18 @@ durumda olan kısım **Modül 2 — Bütçe Isı Haritası**'dır:
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-python datalookup.py     # piyasa değerlerini üretir (opsiyonel, CSV depoda hazır)
-python train_model.py    # adil fiyat modelini eğitir (~1 dk, zorunlu)
-python main.py           # API + arayüz: http://127.0.0.1:8000
+python -m scripts.build_market_values   # piyasa değerleri (opsiyonel, CSV hazır)
+python -m scripts.train_model           # adil fiyat modeli (~1 dk, zorunlu)
+python -m app.main                      # API + arayüz: http://127.0.0.1:8000
 ```
+
+Geliştirirken otomatik yeniden yükleme için:
+`uvicorn app.main:app --reload`
 
 macOS'ta LightGBM için OpenMP gerekiyor: `brew install libomp`.
 
-Model dosyası (`fair_price_model.joblib`, ~6 MB) depoya dâhil değildir;
-`train_model.py` ile üretilir. Model yoksa harita yine çalışır, yalnızca
+Model dosyası (`models/fair_price_model.joblib`, ~6 MB) depoya dâhil değildir;
+`python -m scripts.train_model` ile üretilir. Model yoksa harita yine çalışır, yalnızca
 adil fiyat sekmesi devre dışı kalır.
 
 ## 🔌 API
@@ -99,7 +126,7 @@ haritada renklendirilir. Kalan mahallelerde yeterli ilan verisi yoktur ve
 
 ## 🤖 Adil Fiyat Modeli (Modül 1)
 
-`train_model.py` dört yaklaşımı 5-kat çapraz doğrulamayla karşılaştırır.
+`scripts/train_model.py` dört yaklaşımı 5-kat çapraz doğrulamayla karşılaştırır.
 Hedef `log(fiyat)`, hatalar kullanıcının gördüğü TL uzayında raporlanır:
 
 | Model | MAE | MedAE | Medyan sapma | R² |

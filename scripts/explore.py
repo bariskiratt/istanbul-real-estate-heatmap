@@ -1,6 +1,6 @@
 import pandas as pd
 
-CSV_PATH = "istanbulApartmentForRent.csv"
+from app.config import LISTINGS_CSV as CSV_PATH
 
 
 def main():
