@@ -20,6 +20,7 @@ from app.config import (
 )
 from app.heatmap import STATUS_STYLES, annotate_features, build_budget_heatmap
 from app.pricing import BOUNDS, build_features
+from app.transit import TRANSIT_PATH, AccessibilityIndex, TransitNetwork
 
 
 class EstimateRequest(BaseModel):
@@ -72,6 +73,26 @@ async def lifespan(_app: FastAPI):
     else:
         print(f"⚠️  Model yok ({MODEL_PATH}) — /api/estimate devre dışı. "
               f"Eğitmek için: python -m scripts.train_model")
+
+    # Toplu taşıma erişilebilirliği opsiyonel: veri yoksa /api/alternatives kapalı.
+    if TRANSIT_PATH.exists():
+        network = TransitNetwork.load()
+        prices_by_id = {
+            f["properties"]["id"]: f["properties"]["avg_price"]
+            for f in geojson.get("features", [])
+        }
+        STATE["access"] = AccessibilityIndex(
+            network, geojson.get("features", []), prices_by_id
+        )
+        walkable = sum(
+            1 for p in STATE["access"].places.values() if p["walk_km"] <= 1.2
+        )
+        print(f"✅ Toplu taşıma ağı yüklendi ({len(network.stations)} istasyon; "
+              f"{walkable} mahalle yürüme mesafesinde).")
+    else:
+        print(f"⚠️  Toplu taşıma verisi yok ({TRANSIT_PATH.name}) — "
+              f"/api/alternatives devre dışı. İndirmek için: "
+              f"python -m scripts.fetch_transit")
 
     yield
     STATE.clear()
@@ -209,6 +230,28 @@ async def estimate(payload: EstimateRequest):
         }
 
     return response
+
+
+@app.get("/api/alternatives")
+async def alternatives(
+    neighborhood_id: int = Query(..., ge=0, description="Hedef mahalle id'si"),
+    budget: float = Query(..., gt=0, le=10_000_000, description="Aylık bütçe (TL)"),
+):
+    """Hedef mahalleye raylı sistemle yakın, bütçeye uygun alternatifler.
+
+    id, /api/geojson içindeki her feature'ın properties.id değeridir.
+    """
+    access = STATE.get("access")
+    if access is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Toplu taşıma verisi yüklü değil. "
+                   "Önce 'python -m scripts.fetch_transit' çalıştır.",
+        )
+    result = access.recommend(neighborhood_id, budget)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 if __name__ == "__main__":

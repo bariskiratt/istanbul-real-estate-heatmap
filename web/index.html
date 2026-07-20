@@ -92,6 +92,43 @@
         .popup-title { font-weight: 650; margin-bottom: 2px; }
         .popup-dist { color: #6b7280; font-size: 12px; margin-bottom: 8px; }
         .popup-price { font-size: 17px; font-weight: 650; }
+        .popup-alt {
+            margin-top: 10px; width: 100%; padding: 8px 10px; border: none;
+            border-radius: 6px; background: var(--accent); color: #fff;
+            font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+        }
+
+        /* --- Alternatif öneri paneli (harita üstünde kayan kart) --- */
+        #alt-panel {
+            position: absolute; top: 12px; right: 12px; z-index: 1000;
+            width: 320px; max-width: calc(100% - 24px);
+            max-height: calc(100% - 24px); overflow-y: auto;
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+            padding: 16px 18px; display: none;
+        }
+        #alt-panel.show { display: block; }
+        #alt-panel h3 { margin: 0 0 2px; font-size: 15px; }
+        #alt-panel .close {
+            position: absolute; top: 12px; right: 14px; border: none;
+            background: none; color: var(--muted); font-size: 20px; cursor: pointer;
+            line-height: 1;
+        }
+        .alt-item {
+            padding: 10px 0; border-top: 1px solid var(--border); cursor: pointer;
+        }
+        .alt-item:hover { opacity: .8; }
+        .alt-name { font-weight: 600; font-size: 14px; }
+        .alt-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .alt-price { font-weight: 650; }
+        .alt-save { color: #16a34a; }
+        .hop-badge {
+            display: inline-block; padding: 1px 7px; border-radius: 10px;
+            background: var(--accent); color: #fff; font-size: 11px; font-weight: 600;
+        }
+        .leaflet-marker-icon.alt-pin {
+            border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+        }
     </style>
 </head>
 <body>
@@ -117,7 +154,13 @@
             <div class="legend" id="legend"></div>
         </div>
         <div id="status">Yükleniyor…</div>
-        <div id="map"></div>
+        <div style="position:relative">
+            <div id="map"></div>
+            <div id="alt-panel">
+                <button class="close" id="alt-close" aria-label="Kapat">×</button>
+                <div id="alt-body"></div>
+            </div>
+        </div>
     </div>
 
     <div class="panel" id="estimate-panel" role="tabpanel">
@@ -219,11 +262,17 @@
             var price = props.avg_price == null
                 ? "Yeterli ilan verisi yok"
                 : fmt.format(Math.round(props.avg_price)) + " TL / ay";
-            return '<div class="popup-title">' + (props.neighborhood || "Bilinmeyen") + " Mah.</div>"
+            var html = '<div class="popup-title">' + (props.neighborhood || "Bilinmeyen") + " Mah.</div>"
                  + '<div class="popup-dist">' + (props.district || "") + "</div>"
                  + '<div class="popup-price">' + price + "</div>"
                  + '<div class="popup-dist" style="margin:6px 0 0">'
                  + (STATUS_STYLES[status] || STATUS_STYLES.nodata).label + "</div>";
+            // Yalnızca fiyatı bilinen mahalleler için alternatif önerisi anlamlı.
+            if (props.avg_price != null) {
+                html += '<button class="popup-alt" data-id="' + props.id + '">'
+                     + "🚇 Yakın uygun alternatifler</button>";
+            }
+            return html;
         }
 
         function renderLegend(summary) {
@@ -307,6 +356,119 @@
                 setStatus("Harita verisi yüklenemedi: " + err.message
                     + ". Sunucuyu 'python main.py' ile başlat.", true);
             });
+
+        // ---------------------------------------------------------------
+        // Alternatif semt önerileri (Modül 3)
+        // ---------------------------------------------------------------
+        var altPanel = document.getElementById("alt-panel");
+        var altBody = document.getElementById("alt-body");
+        var altMarkers = [];
+
+        function clearAltMarkers() {
+            altMarkers.forEach(function (m) { map.removeLayer(m); });
+            altMarkers = [];
+        }
+
+        function closeAlt() {
+            altPanel.classList.remove("show");
+            clearAltMarkers();
+        }
+        document.getElementById("alt-close").addEventListener("click", closeAlt);
+
+        function pin(color) {
+            return L.divIcon({
+                className: "alt-pin",
+                html: '<div style="width:14px;height:14px;border-radius:50%;'
+                    + 'background:' + color + '"></div>',
+                iconSize: [14, 14]
+            });
+        }
+
+        function showAlternatives(data) {
+            clearAltMarkers();
+            var t = data.target;
+
+            if (!data.reachable) {
+                altBody.innerHTML = '<h3>' + t.name + " Mah.</h3>"
+                    + '<div class="alt-meta">' + (t.message || "Öneri üretilemedi.")
+                    + "</div>";
+                altPanel.classList.add("show");
+                return;
+            }
+
+            var recs = data.recommendations;
+            var head = '<h3>' + t.name + " Mah. yakını</h3>"
+                + '<div class="alt-meta">Bütçe: ' + fmt.format(data.budget)
+                + " TL · raylı sistemle ulaşılabilir " + recs.length
+                + " uygun mahalle</div>";
+
+            if (!recs.length) {
+                altBody.innerHTML = head + '<div class="alt-item" style="cursor:default">'
+                    + "Bu bütçeyle ağ üzerinde uygun alternatif bulunamadı. "
+                    + "Bütçeyi artırmayı dene.</div>";
+                altPanel.classList.add("show");
+                return;
+            }
+
+            // Hedefi vurgula (mor), önerileri yeşil pinle.
+            altMarkers.push(L.marker([t.lat, t.lon], { icon: pin("#7c3aed") })
+                .bindTooltip(t.name + " (hedef)").addTo(map));
+
+            altBody.innerHTML = head + recs.map(function (r, i) {
+                var save = r.saving != null && r.saving > 0
+                    ? ' · <span class="alt-save">' + fmt.format(r.saving) + " TL ucuz</span>"
+                    : "";
+                return '<div class="alt-item" data-lat="' + r.lat + '" data-lon="' + r.lon
+                    + '" data-id="' + r.id + '">'
+                    + '<div class="alt-name">' + (i + 1) + ". " + r.name + " Mah."
+                    + ' <span class="hop-badge">' + r.network_cost + " durak</span></div>"
+                    + '<div class="alt-meta"><span class="alt-price">'
+                    + fmt.format(Math.round(r.price)) + " TL</span>"
+                    + (r.district ? " · " + r.district : "") + save + "</div></div>";
+            }).join("");
+
+            recs.forEach(function (r) {
+                altMarkers.push(L.marker([r.lat, r.lon], { icon: pin("#16a34a") })
+                    .bindTooltip(r.name + " · " + fmt.format(Math.round(r.price)) + " TL")
+                    .addTo(map));
+            });
+
+            altPanel.classList.add("show");
+
+            // Listeye tıkla → haritada o mahalleye uç.
+            altBody.querySelectorAll(".alt-item[data-lat]").forEach(function (el) {
+                el.addEventListener("click", function () {
+                    map.flyTo([+el.dataset.lat, +el.dataset.lon], 14);
+                });
+            });
+        }
+
+        function fetchAlternatives(id) {
+            setStatus("Alternatifler hesaplanıyor…");
+            fetch(API + "/api/alternatives?neighborhood_id=" + id
+                + "&budget=" + (+slider.value))
+                .then(function (r) {
+                    return r.json().then(function (d) {
+                        if (!r.ok) throw new Error(
+                            typeof d.detail === "string" ? d.detail : "API " + r.status);
+                        return d;
+                    });
+                })
+                .then(function (data) {
+                    showAlternatives(data);
+                    setStatus("");
+                    map.closePopup();
+                })
+                .catch(function (err) {
+                    setStatus("Alternatifler alınamadı: " + err.message, true);
+                });
+        }
+
+        // Popup içeriği dinamik olduğu için tıklamayı harita üzerinden delege et.
+        map.getContainer().addEventListener("click", function (e) {
+            var btn = e.target.closest && e.target.closest(".popup-alt");
+            if (btn) fetchAlternatives(+btn.dataset.id);
+        });
 
         // ---------------------------------------------------------------
         // Sekmeler

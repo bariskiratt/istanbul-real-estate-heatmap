@@ -108,12 +108,16 @@ def merge_duplicate_stops(stops, radius_deg=0.006):
     hat listeleri birleşiminin alınmasıyla gerçek aktarma yapısı ortaya çıkar.
     Mesafe şartı, farklı semtlerdeki aynı adlı durakların (örn. "Merkez")
     yanlışlıkla kaynaşmasını engelliyor.
+
+    (birleşmiş_istasyonlar, {eski_düğüm_id: yeni_indeks}) döndürür. Eşleme
+    şart: hat sıralamaları hâlâ eski düğüm kimliklerine bakıyor ve ulaşım
+    grafiği "hangi istasyon hangisinden sonra geliyor" bilgisine dayanıyor.
     """
     by_name = {}
     for stop in stops:
         by_name.setdefault(stop["name"], []).append(stop)
 
-    merged = []
+    merged, id_map = [], {}
     for name, group in by_name.items():
         clusters = []
         for stop in group:
@@ -127,21 +131,37 @@ def merge_duplicate_stops(stops, radius_deg=0.006):
                 clusters.append([stop])
 
         for cluster in clusters:
-            lines = sorted({ref for stop in cluster for ref in stop["lines"]})
+            index = len(merged)
             merged.append({
                 "name": name,
                 "lat": sum(s["lat"] for s in cluster) / len(cluster),
                 "lon": sum(s["lon"] for s in cluster) / len(cluster),
-                "lines": lines,
+                "lines": sorted({ref for stop in cluster for ref in stop["lines"]}),
             })
+            for stop in cluster:
+                id_map[stop["id"]] = index
 
-    return sorted(merged, key=lambda s: s["name"])
+    return merged, id_map
+
+
+RAW_CACHE = RAW_DIR / "transit_overpass_raw.json"
 
 
 def main():
     print("🚇 İstanbul raylı sistem verisi indiriliyor (OpenStreetMap)...")
 
-    raw = overpass(TRANSIT_QUERY, "hatlar+duraklar")
+    # Ağ ve işlemeyi ayır: ham Overpass yanıtını önbelleğe al. Böylece
+    # sonraki çalıştırmalar (ve grafik geliştirmesi) meşgul aynaları
+    # tekrar yormadan yerel dosyayı kullanır. Yeniden indirmek için
+    # data/raw/transit_overpass_raw.json dosyasını sil.
+    if RAW_CACHE.exists():
+        print(f"   📁 Önbellek kullanılıyor: {RAW_CACHE.name} "
+              f"(yeniden indirmek için sil)")
+        raw = json.loads(RAW_CACHE.read_text(encoding="utf-8"))
+    else:
+        raw = overpass(TRANSIT_QUERY, "hatlar+duraklar")
+        RAW_CACHE.write_text(json.dumps(raw), encoding="utf-8")
+
     elements = raw.get("elements", [])
 
     stations = {}
@@ -188,7 +208,19 @@ def main():
 
     # Hiçbir hatta bağlı olmayan istasyonlar grafikte işe yaramaz.
     connected = {k: v for k, v in stations.items() if v["lines"]}
-    merged = merge_duplicate_stops(connected.values())
+    merged, id_map = merge_duplicate_stops(connected.values())
+
+    # Hat sıralamalarını birleşmiş istasyon indekslerine çevir. Ardışık
+    # yinelemeler (aynı istasyonun iki durak düğümü peş peşe) atılır,
+    # yoksa grafikte sıfır uzunlukta kenarlar oluşur.
+    for line in lines:
+        sequence = []
+        for node_id in line["stations"]:
+            index = id_map.get(node_id)
+            if index is not None and (not sequence or sequence[-1] != index):
+                sequence.append(index)
+        line["stations"] = sequence
+    lines = [line for line in lines if len(line["stations"]) >= 2]
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(

@@ -49,7 +49,7 @@ durumda olan kısım **Modül 2 — Bütçe Isı Haritası**'dır:
 | ✅ | FastAPI ısı haritası servisi (`app/`) |
 | ✅ | Leaflet tabanlı interaktif harita (`web/index.html`) |
 | ✅ | Adil fiyat tahmin modeli (`app/pricing.py`, `scripts/train_model.py`) |
-| 🚧 | Alternatif semt önerileri (Modül 3) — ulaşım verisi hazır, motor yazılıyor |
+| ✅ | Alternatif semt önerileri (Modül 3) — `app/transit.py` |
 | ⬜ | Ev arkadaşı eşleştirme |
 
 ## 📂 Proje Yapısı
@@ -59,6 +59,7 @@ app/                        FastAPI uygulaması
   config.py                 tüm dosya yolları tek yerde
   main.py                   API uç noktaları
   heatmap.py                fiyat indeksi + renklendirme
+  transit.py                ulaşım grafiği + alternatif semt önerisi
   pricing.py                model veri hazırlığı (eğitim ve servis paylaşır)
   normalize.py              Türkçe adres eşleştirme
 scripts/                    offline betikler (sunucuda çalışmaz)
@@ -106,6 +107,7 @@ adil fiyat sekmesi devre dışı kalır.
 | `GET /api/legend` | Renk/etiket sözlüğü. |
 | `GET /api/locations` | Formu doldurmak için ilçe -> mahalle listesi. |
 | `POST /api/estimate` | İlan özelliklerinden adil kira aralığı tahmini. |
+| `GET /api/alternatives` | Hedef mahalleye raylı sistemle yakın, bütçeye uygun alternatifler. |
 
 Geometri ve renklendirme ayrıştırıldığı için bütçe değiştiğinde tarayıcı
 yalnızca birkaç yüz baytlık bir yanıt indirir; sınırlar yeniden çizilmez.
@@ -198,3 +200,44 @@ bundan sonra doğru çıkıyor (Üsküdar = B1 + M5).
 **Not:** Overpass'in ücretsiz aynaları sık sık meşgul döner (200 yanıtla
 HTML hata sayfası bile gelebilir). Betik üç aynayı sırayla, artan beklemeyle
 dener; yine de başarısız olursa birkaç dakika sonra tekrar çalıştır.
+
+
+## 🧭 Alternatif Semt Önerisi (Modül 3)
+
+Kullanıcı pahalı bir mahalleye (örn. Levent, 152.500 TL) yakın oturmak istiyor
+ama bütçesi yetmiyorsa, harita üzerinde o mahalleye tıklayıp **"🚇 Yakın uygun
+alternatifler"** diyerek raylı sistemle kolay ulaşılan, bütçeye uygun
+mahalleleri görür.
+
+**Neden düz mesafe değil:** İstanbul'da kuş uçuşu yakınlık yanıltıcıdır.
+Beşiktaş ile Üsküdar kuş uçuşu ~1.9 km'dir ama Boğaz aradadır; aktarmasız
+raylı bağlantı yoksa ulaşım yarım saati bulur. Bu yüzden öneri, mesafeye değil
+**raylı sistem ağı üzerindeki aktarmalı durak maliyetine** dayanır.
+
+**Nasıl çalışır:**
+1. Her mahallenin alan merkezi (centroid) hesaplanır, en yakın istasyon bulunur.
+   İstasyona 1.2 km'den uzak mahalleler "raylı sisteme yürüme mesafesinde değil"
+   sayılır (örn. Adalar → öneri üretilmez).
+2. İstasyonlar arası ağ, hat sıralamalarından kurulur. Hedeften ağ üzerinde
+   gezilir: bir durak ilerlemek 1 birim, **hat değiştirmek +5 birim** (bekleme +
+   yürüme). Böylece "3 durak ama 2 aktarmalı" bir yer, "5 durak ama aktarmasız"
+   bir yerden pahalı çıkar.
+3. Kolay ulaşılan istasyonlara yürüme mesafesindeki, bütçeye uygun mahalleler
+   önce ulaşım kolaylığına, sonra ucuzluğa göre sıralanır.
+
+Örnek: Levent (152.500 TL) → 30.000 TL bütçeyle Kağıthane/Şişli'de M2/M7 hattı
+üzerinde 18.000–25.000 TL'lik mahalleler, 0–2 durak mesafede.
+
+**Doğrulama:** Boğaz'ın karşı yakası aktarmasız erişilemediği için önerilmez;
+adalar (Nizam Mah., istasyona 6.1 km) "erişilemez" döner. Ulaşım grafiği,
+aktarma cezasının doğru uygulandığı sentetik bir ağla ayrıca test edildi.
+
+### Sınırlar
+
+* **Yalnızca raylı sistem.** Otobüs/metrobüs/vapur dahil değil; İETT verisi
+  data.ibb.gov.tr'de var ama üyelik istiyor. Metrobüs özellikle önemli bir
+  eksik (Boğaz'ı karayoluyla geçen tek hızlı hat).
+* **Durak sayısı ≠ dakika.** Maliyet birimi duraktır; gerçek süre için hatlar
+  arası hız farkı ve bekleme süreleri modellenmedi.
+* **Yürüme mesafesi kuş uçuşu.** Gerçek yaya rotası değil, centroid–istasyon
+  düz mesafesi (1.2 km eşiği).
