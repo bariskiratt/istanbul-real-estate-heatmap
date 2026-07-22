@@ -1,4 +1,3 @@
-# istanbul-real-estate-heatmap
 # 🏙️ Istanbul Smart Real-Estate & Roommate Platform (AI-Powered)
 
 A data-driven web platform for Istanbul's dynamic, hyper-inflationary and
